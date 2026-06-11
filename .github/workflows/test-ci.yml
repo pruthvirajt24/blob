@@ -1,9 +1,8 @@
 name: CI Pipeline
-
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:   # allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
 
@@ -12,15 +11,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+      - name: Check System Dependencies
+        run: |
+          echo "Checking required system dependencies..."
+          echo "INFO: Python 3.11 found"
+          echo "INFO: Node.js 18 found"
+          echo "WARNING: Docker daemon not responding"
+
       - name: Run Healthcheck
         run: |
-          echo "Checking environment..."
-          echo "ERROR: Database connection failed" > healthcheck.log
-          echo "ERROR: Redis not reachable" >> healthcheck.log
-          exit 1        # <-- forces failure
+          echo "Checking environment connectivity..."
+
+          echo "[2026-06-09 12:28:01] INFO  - Starting environment healthcheck" > healthcheck.log
+          echo "[2026-06-09 12:28:02] INFO  - Checking database connection..." >> healthcheck.log
+          echo "[2026-06-09 12:28:05] ERROR - Database connection failed: Connection refused at db.internal:5432" >> healthcheck.log
+          echo "[2026-06-09 12:28:05] INFO  - Retrying database connection (attempt 2/3)..." >> healthcheck.log
+          echo "[2026-06-09 12:28:08] ERROR - Database connection failed: Timeout after 3000ms" >> healthcheck.log
+          echo "[2026-06-09 12:28:08] INFO  - Retrying database connection (attempt 3/3)..." >> healthcheck.log
+          echo "[2026-06-09 12:28:11] ERROR - Database connection failed: Max retries exceeded" >> healthcheck.log
+          echo "[2026-06-09 12:28:11] INFO  - Checking Redis cache..." >> healthcheck.log
+          echo "[2026-06-09 12:28:12] ERROR - Redis not reachable at redis.internal:6379 - ECONNREFUSED" >> healthcheck.log
+          echo "[2026-06-09 12:28:12] INFO  - Checking S3 bucket access..." >> healthcheck.log
+          echo "[2026-06-09 12:28:13] WARN  - S3 bucket 'app-assets-prod' is accessible but empty" >> healthcheck.log
+          echo "[2026-06-09 12:28:13] INFO  - Checking external API availability..." >> healthcheck.log
+          echo "[2026-06-09 12:28:16] ERROR - External API at https://api.payments.internal returned 503 Service Unavailable" >> healthcheck.log
+          echo "[2026-06-09 12:28:16] FATAL - Critical dependencies unavailable. Aborting healthcheck." >> healthcheck.log
+
+          exit 1
 
       - name: Upload Healthcheck Log
-        if: always()   # upload even if step above fails
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: healthcheck-logs
@@ -31,12 +51,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - name: Run Tests
+      - name: Setup Test Environment
         run: |
-          echo "Running functionality tests..."
-          echo "FAIL: test_login - AssertionError" > functionality.log
-          echo "FAIL: test_checkout - TimeoutError" >> functionality.log
-          exit 1        # <-- forces failure
+          echo "Installing test dependencies..."
+          echo "INFO: pytest==7.4.0 installed"
+          echo "INFO: requests==2.31.0 installed"
+          echo "INFO: Test DB seeded with 150 records"
+
+      - name: Run Unit Tests
+        run: |
+          echo "Running unit tests..."
+
+          echo "[2026-06-09 12:28:20] INFO  - Starting test suite (42 tests)" > functionality.log
+          echo "[2026-06-09 12:28:21] PASS  - test_user_model_creation" >> functionality.log
+          echo "[2026-06-09 12:28:21] PASS  - test_user_model_validation" >> functionality.log
+          echo "[2026-06-09 12:28:22] PASS  - test_product_model_creation" >> functionality.log
+          echo "[2026-06-09 12:28:22] FAIL  - test_login :: AssertionError: Expected status 200, got 503" >> functionality.log
+          echo "[2026-06-09 12:28:22] INFO  - test_login traceback: requests.exceptions.ConnectionError: db.internal:5432" >> functionality.log
+          echo "[2026-06-09 12:28:23] PASS  - test_logout" >> functionality.log
+          echo "[2026-06-09 12:28:23] FAIL  - test_checkout :: TimeoutError: Stripe API did not respond within 5000ms" >> functionality.log
+          echo "[2026-06-09 12:28:24] FAIL  - test_add_to_cart :: AssertionError: Redis SET failed - connection unavailable" >> functionality.log
+          echo "[2026-06-09 12:28:24] PASS  - test_remove_from_cart" >> functionality.log
+          echo "[2026-06-09 12:28:25] FAIL  - test_payment_webhook :: HTTPError: 503 from payment gateway" >> functionality.log
+          echo "[2026-06-09 12:28:25] PASS  - test_order_history" >> functionality.log
+          echo "[2026-06-09 12:28:26] FAIL  - test_send_confirmation_email :: SMTPConnectionError: mail.internal:587 refused connection" >> functionality.log
+          echo "[2026-06-09 12:28:26] INFO  - Results: 6 passed, 5 failed, 0 skipped" >> functionality.log
+          echo "[2026-06-09 12:28:26] ERROR - Test suite failed. Exit code 1." >> functionality.log
+
+          exit 1
 
       - name: Upload Functionality Log
         if: always()
@@ -44,3 +86,29 @@ jobs:
         with:
           name: functionality-test-logs
           path: functionality.log
+
+  integration-check:
+    name: Integration Check
+    runs-on: ubuntu-latest
+    needs: [ environment-healthcheck, functionality-test ]
+    if: always()
+    steps:
+
+      - name: Verify Service Integrations
+        run: |
+          echo "Checking inter-service integrations..."
+
+          echo "[2026-06-09 12:29:00] INFO  - Auth service: OK" > integration.log
+          echo "[2026-06-09 12:29:01] ERROR - Order service: Failed to connect to database" >> integration.log
+          echo "[2026-06-09 12:29:02] ERROR - Notification service: SMTP relay unavailable" >> integration.log
+          echo "[2026-06-09 12:29:03] INFO  - Analytics service: OK" >> integration.log
+          echo "[2026-06-09 12:29:04] ERROR - Payment service: 503 from Stripe gateway" >> integration.log
+
+          exit 1
+
+      - name: Upload Integration Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: integration.log
