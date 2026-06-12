@@ -1,0 +1,197 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+
+  # ✅ JOB 1 — PASSES
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Run Linter
+        run: |
+          echo "Running ESLint..."
+          echo "INFO: No linting errors found"
+          echo "INFO: Code style check passed"
+          echo "INFO: 142 files scanned, 0 issues"
+
+      - name: Run Security Scan
+        run: |
+          echo "Running security scan..."
+          echo "INFO: No critical vulnerabilities found"
+          echo "INFO: 3 low severity warnings (suppressed)"
+          echo "INFO: Security check passed"
+
+
+  # ✅ JOB 2 — PASSES
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Setup Environment
+        run: |
+          echo "Installing dependencies..."
+          echo "INFO: All 47 packages installed"
+          echo "INFO: Test database seeded"
+
+      - name: Run Unit Tests
+        run: |
+          echo "Running unit tests..."
+          echo "[INFO]  - test_user_create        PASS" > unit-test.log
+          echo "[INFO]  - test_user_update        PASS" >> unit-test.log
+          echo "[INFO]  - test_user_delete        PASS" >> unit-test.log
+          echo "[INFO]  - test_product_create     PASS" >> unit-test.log
+          echo "[INFO]  - test_product_search     PASS" >> unit-test.log
+          echo "[INFO]  - test_cart_add           PASS" >> unit-test.log
+          echo "[INFO]  - test_cart_remove        PASS" >> unit-test.log
+          echo "[INFO]  - test_order_create       PASS" >> unit-test.log
+          echo "[INFO]  - Results: 8 passed, 0 failed" >> unit-test.log
+          cat unit-test.log
+
+      - name: Upload Unit Test Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-logs
+          path: unit-test.log
+
+
+  # ❌ JOB 3 — FAILS — Database migration error
+  environment-healthcheck:
+    name: Environment Healthcheck
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Check System Dependencies
+        run: |
+          echo "INFO: Python 3.11 found"
+          echo "INFO: Node.js 18 found"
+          echo "INFO: Docker 24.0 found"
+
+      - name: Run Healthcheck
+        run: |
+          echo "[2026-06-11 09:00:01] INFO  - Starting environment healthcheck" > healthcheck.log
+          echo "[2026-06-11 09:00:02] INFO  - Checking database connection..." >> healthcheck.log
+          echo "[2026-06-11 09:00:05] ERROR - Database connection failed: Connection refused at db.internal:5432" >> healthcheck.log
+          echo "[2026-06-11 09:00:06] INFO  - Retrying (attempt 2/3)..." >> healthcheck.log
+          echo "[2026-06-11 09:00:09] ERROR - Database connection failed: Timeout after 3000ms" >> healthcheck.log
+          echo "[2026-06-11 09:00:10] INFO  - Retrying (attempt 3/3)..." >> healthcheck.log
+          echo "[2026-06-11 09:00:13] ERROR - Database connection failed: Max retries exceeded" >> healthcheck.log
+          echo "[2026-06-11 09:00:13] INFO  - Checking Redis cache..." >> healthcheck.log
+          echo "[2026-06-11 09:00:14] ERROR - Redis not reachable at redis.internal:6379 - ECONNREFUSED" >> healthcheck.log
+          echo "[2026-06-11 09:00:15] INFO  - Checking migration status..." >> healthcheck.log
+          echo "[2026-06-11 09:00:16] ERROR - Migration v2.3.1 failed: Column 'user_role' already exists in table 'users'" >> healthcheck.log
+          echo "[2026-06-11 09:00:16] ERROR - Pending migrations: 3 unapplied" >> healthcheck.log
+          echo "[2026-06-11 09:00:17] FATAL - Environment not ready. Aborting." >> healthcheck.log
+          exit 1
+
+      - name: Upload Healthcheck Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthcheck-logs
+          path: healthcheck.log
+
+
+  # ❌ JOB 4 — FAILS — Missing secret / config error
+  functionality-test:
+    name: Functionality Test
+    runs-on: ubuntu-latest
+    needs: [ unit-tests ]
+    steps:
+
+      - name: Load Config
+        run: |
+          echo "Loading environment config..."
+          echo "INFO: Base config loaded"
+          echo "WARNING: STRIPE_SECRET_KEY is not set"
+          echo "WARNING: SENDGRID_API_KEY is not set"
+          echo "WARNING: JWT_SECRET is not set"
+
+      - name: Run Integration Tests
+        run: |
+          echo "[2026-06-11 09:01:00] INFO  - Starting integration test suite (28 tests)" > functionality.log
+          echo "[2026-06-11 09:01:01] PASS  - test_health_endpoint" >> functionality.log
+          echo "[2026-06-11 09:01:01] PASS  - test_static_assets" >> functionality.log
+          echo "[2026-06-11 09:01:02] FAIL  - test_user_login :: ConfigError: JWT_SECRET environment variable is not set" >> functionality.log
+          echo "[2026-06-11 09:01:02] FAIL  - test_user_register :: ConfigError: JWT_SECRET environment variable is not set" >> functionality.log
+          echo "[2026-06-11 09:01:03] FAIL  - test_payment_intent :: ConfigError: STRIPE_SECRET_KEY is missing or empty" >> functionality.log
+          echo "[2026-06-11 09:01:03] FAIL  - test_payment_confirm :: ConfigError: STRIPE_SECRET_KEY is missing or empty" >> functionality.log
+          echo "[2026-06-11 09:01:04] FAIL  - test_send_welcome_email :: ConfigError: SENDGRID_API_KEY not configured" >> functionality.log
+          echo "[2026-06-11 09:01:04] FAIL  - test_send_reset_email :: ConfigError: SENDGRID_API_KEY not configured" >> functionality.log
+          echo "[2026-06-11 09:01:05] PASS  - test_public_products_list" >> functionality.log
+          echo "[2026-06-11 09:01:05] PASS  - test_public_product_detail" >> functionality.log
+          echo "[2026-06-11 09:01:06] INFO  - Results: 4 passed, 6 failed, 18 skipped" >> functionality.log
+          echo "[2026-06-11 09:01:06] ERROR - Test suite failed due to missing configuration secrets." >> functionality.log
+          exit 1
+
+      - name: Upload Functionality Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functionality-test-logs
+          path: functionality.log
+
+
+  # ❌ JOB 5 — FAILS — Performance / timeout error
+  performance-test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    needs: [ unit-tests ]
+    steps:
+
+      - name: Run Performance Benchmarks
+        run: |
+          echo "[2026-06-11 09:02:00] INFO  - Starting performance benchmarks" > performance.log
+          echo "[2026-06-11 09:02:01] INFO  - Baseline: API response target < 200ms" >> performance.log
+          echo "[2026-06-11 09:02:02] PASS  - GET /api/products      avg=89ms   p99=145ms" >> performance.log
+          echo "[2026-06-11 09:02:03] PASS  - GET /api/categories     avg=45ms   p99=90ms" >> performance.log
+          echo "[2026-06-11 09:02:04] FAIL  - POST /api/orders        avg=4823ms p99=9200ms — TIMEOUT: exceeds 200ms threshold" >> performance.log
+          echo "[2026-06-11 09:02:05] FAIL  - GET /api/user/history   avg=3100ms p99=7800ms — TIMEOUT: N+1 query detected (847 queries)" >> performance.log
+          echo "[2026-06-11 09:02:06] FAIL  - POST /api/checkout      avg=6200ms p99=12000ms — TIMEOUT: Stripe API latency spike" >> performance.log
+          echo "[2026-06-11 09:02:07] FAIL  - GET /api/search         avg=2900ms p99=5500ms — TIMEOUT: Missing index on products.name" >> performance.log
+          echo "[2026-06-11 09:02:08] ERROR - Memory usage peaked at 94% during /api/checkout load test" >> performance.log
+          echo "[2026-06-11 09:02:09] ERROR - 4 endpoints failed performance thresholds" >> performance.log
+          exit 1
+
+      - name: Upload Performance Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-logs
+          path: performance.log
+
+
+  # ❌ JOB 6 — FAILS — Integration/service failures
+  integration-check:
+    name: Integration Check
+    runs-on: ubuntu-latest
+    needs: [ environment-healthcheck, functionality-test, performance-test ]
+    if: always()
+    steps:
+
+      - name: Verify Service Integrations
+        run: |
+          echo "[2026-06-11 09:03:00] INFO  - Starting service integration checks" > integration.log
+          echo "[2026-06-11 09:03:01] PASS  - Auth service:        OK (142ms)" >> integration.log
+          echo "[2026-06-11 09:03:02] PASS  - Analytics service:   OK (89ms)" >> integration.log
+          echo "[2026-06-11 09:03:03] ERROR - Order service:       FAIL — DB connection refused at db.internal:5432" >> integration.log
+          echo "[2026-06-11 09:03:04] ERROR - Payment service:     FAIL — Stripe gateway returned 503 Service Unavailable" >> integration.log
+          echo "[2026-06-11 09:03:05] ERROR - Notification service: FAIL — SMTP relay at mail.internal:587 refused connection" >> integration.log
+          echo "[2026-06-11 09:03:06] ERROR - Cache service:       FAIL — Redis ECONNREFUSED at redis.internal:6379" >> integration.log
+          echo "[2026-06-11 09:03:07] INFO  - Results: 2 services OK, 4 services FAILED" >> integration.log
+          echo "[2026-06-11 09:03:08] FATAL - Critical service integrations unavailable. Pipeline halted." >> integration.log
+          exit 1
+
+      - name: Upload Integration Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: integration.log

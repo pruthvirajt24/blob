@@ -1,0 +1,341 @@
+name: Full QA Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+
+  environment-healthcheck:
+    name: Environment Healthcheck
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Check System Dependencies
+        run: |
+          echo "INFO: Checking required system dependencies..."
+          echo "INFO: Python 3.11 found at /usr/bin/python3.11"
+          echo "INFO: Node.js 20 found at /usr/bin/node"
+          echo "INFO: Docker 24.0 found at /usr/bin/docker"
+          echo "INFO: Redis CLI found at /usr/bin/redis-cli"
+          echo "WARNING: PostgreSQL client not found in PATH"
+          echo "WARNING: kubectl not found — skipping cluster checks"
+
+      - name: Run Healthcheck
+        run: |
+          cat > healthcheck.log << 'EOF'
+          [2026-06-12 10:00:01] INFO  - HealthCheck Agent v2.4.1 starting
+          [2026-06-12 10:00:01] INFO  - Environment: staging | Region: us-west-2
+          [2026-06-12 10:00:02] INFO  - Checking PostgreSQL at db-primary.internal:5432
+          [2026-06-12 10:00:03] ERROR - PostgreSQL connection refused: ECONNREFUSED db-primary.internal:5432
+          [2026-06-12 10:00:03] INFO  - Retrying PostgreSQL (attempt 2/5) with 2s backoff
+          [2026-06-12 10:00:05] ERROR - PostgreSQL timeout: connection timed out after 2000ms
+          [2026-06-12 10:00:05] INFO  - Retrying PostgreSQL (attempt 3/5) with 4s backoff
+          [2026-06-12 10:00:09] ERROR - PostgreSQL timeout: connection timed out after 4000ms
+          [2026-06-12 10:00:09] INFO  - Retrying PostgreSQL (attempt 4/5) with 8s backoff
+          [2026-06-12 10:00:17] ERROR - PostgreSQL timeout: connection timed out after 8000ms
+          [2026-06-12 10:00:17] INFO  - Retrying PostgreSQL (attempt 5/5) with 16s backoff
+          [2026-06-12 10:00:33] ERROR - PostgreSQL FATAL: Max retries exceeded. DB unavailable.
+          [2026-06-12 10:00:33] INFO  - Checking PostgreSQL replica at db-replica.internal:5432
+          [2026-06-12 10:00:34] ERROR - PostgreSQL replica also unreachable: ECONNREFUSED
+          [2026-06-12 10:00:34] INFO  - Checking Redis primary at redis-primary.internal:6379
+          [2026-06-12 10:00:35] ERROR - Redis ECONNREFUSED at redis-primary.internal:6379
+          [2026-06-12 10:00:35] INFO  - Checking Redis replica at redis-replica.internal:6379
+          [2026-06-12 10:00:36] ERROR - Redis replica ECONNREFUSED at redis-replica.internal:6379
+          [2026-06-12 10:00:36] INFO  - Checking RabbitMQ at mq.internal:5672
+          [2026-06-12 10:00:37] ERROR - RabbitMQ connection refused at mq.internal:5672
+          [2026-06-12 10:00:37] INFO  - Checking Elasticsearch at elastic.internal:9200
+          [2026-06-12 10:00:38] WARN  - Elasticsearch returned 503 Service Unavailable
+          [2026-06-12 10:00:38] INFO  - Checking S3 bucket: app-assets-staging
+          [2026-06-12 10:00:39] WARN  - S3 bucket accessible but 3 required config files missing
+          [2026-06-12 10:00:39] INFO  - Missing S3 files: config/app.json, config/secrets.enc, config/feature-flags.json
+          [2026-06-12 10:00:39] INFO  - Checking database migrations
+          [2026-06-12 10:00:40] ERROR - Migration check failed: cannot connect to DB
+          [2026-06-12 10:00:40] INFO  - Last known migration state: v3.1.2 (from cache)
+          [2026-06-12 10:00:40] WARN  - 5 unapplied migrations detected in cache: v3.1.3, v3.1.4, v3.2.0, v3.2.1, v3.2.2
+          [2026-06-12 10:00:41] INFO  - Checking external payment gateway: https://api.stripe.com/v1/health
+          [2026-06-12 10:00:42] ERROR - Stripe gateway: 503 Service Unavailable (retry 1/3)
+          [2026-06-12 10:00:44] ERROR - Stripe gateway: 503 Service Unavailable (retry 2/3)
+          [2026-06-12 10:00:46] ERROR - Stripe gateway: 503 Service Unavailable (retry 3/3)
+          [2026-06-12 10:00:46] ERROR - Stripe gateway permanently unavailable
+          [2026-06-12 10:00:46] INFO  - Checking SendGrid SMTP: smtp.sendgrid.net:587
+          [2026-06-12 10:00:47] ERROR - SMTP connection refused at smtp.sendgrid.net:587
+          [2026-06-12 10:00:47] INFO  - Checking internal mail relay: mail.internal:25
+          [2026-06-12 10:00:48] ERROR - Internal mail relay refused connection at mail.internal:25
+          [2026-06-12 10:00:48] INFO  - Checking Vault secret store at vault.internal:8200
+          [2026-06-12 10:00:49] ERROR - Vault sealed or unreachable: 503 at vault.internal:8200
+          [2026-06-12 10:00:49] WARN  - Cannot retrieve secrets: JWT_SECRET, DB_PASSWORD, STRIPE_KEY, SENDGRID_KEY
+          [2026-06-12 10:00:50] INFO  - Checking Kubernetes API at k8s.internal:6443
+          [2026-06-12 10:00:51] ERROR - Kubernetes API unreachable: TLS handshake timeout
+          [2026-06-12 10:00:51] INFO  - Checking Prometheus metrics endpoint: prometheus.internal:9090
+          [2026-06-12 10:00:52] WARN  - Prometheus returned stale data (last scrape: 47 minutes ago)
+          [2026-06-12 10:00:52] INFO  - Checking Grafana dashboard: grafana.internal:3000
+          [2026-06-12 10:00:53] WARN  - Grafana accessible but 12 alerts firing
+          [2026-06-12 10:00:53] INFO  - Summary: 0/12 critical checks passed
+          [2026-06-12 10:00:53] FATAL - Environment not ready. All critical dependencies unavailable. Aborting pipeline.
+          EOF
+          exit 1
+
+      - name: Upload Healthcheck Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthcheck-logs
+          path: healthcheck.log
+
+
+  functionality-test:
+    name: Functionality Test
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Setup Test Environment
+        run: |
+          echo "INFO: Installing test dependencies..."
+          echo "INFO: pytest==8.3.2 installed"
+          echo "INFO: requests==2.32.0 installed"
+          echo "INFO: paramiko==3.4.0 installed"
+          echo "INFO: sqlalchemy==2.0.30 installed"
+          echo "WARNING: STRIPE_SECRET_KEY is not set"
+          echo "WARNING: SENDGRID_API_KEY is not set"
+          echo "WARNING: JWT_SECRET is not set"
+          echo "WARNING: DB_CONNECTION_STRING is not set"
+          echo "INFO: Test DB seeding skipped — DB unavailable"
+
+      - name: Run Integration Tests
+        run: |
+          cat > functionality.log << 'EOF'
+          [2026-06-12 10:01:00] INFO  - pytest v8.3.2 starting
+          [2026-06-12 10:01:00] INFO  - Collected 86 tests across 14 modules
+          [2026-06-12 10:01:01] INFO  - Running authentication tests (12 tests)
+          [2026-06-12 10:01:02] PASS  - test_health_endpoint :: GET /health returned 200 OK
+          [2026-06-12 10:01:02] PASS  - test_static_assets :: Static assets served correctly
+          [2026-06-12 10:01:03] FAIL  - test_user_register :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:03] FAIL  - test_user_login :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:04] FAIL  - test_user_logout :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:04] FAIL  - test_refresh_token :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:05] FAIL  - test_password_reset_request :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:05] FAIL  - test_password_reset_confirm :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:06] FAIL  - test_oauth_google :: ConfigError: GOOGLE_CLIENT_ID not set
+          [2026-06-12 10:01:06] FAIL  - test_oauth_github :: ConfigError: GITHUB_OAUTH_SECRET not set
+          [2026-06-12 10:01:07] FAIL  - test_mfa_setup :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:07] FAIL  - test_mfa_verify :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:08] INFO  - Auth tests: 2 passed, 10 failed
+          [2026-06-12 10:01:08] INFO  - Running database tests (15 tests)
+          [2026-06-12 10:01:09] FAIL  - test_db_connection :: ConnectionError: DB_CONNECTION_STRING not set
+          [2026-06-12 10:01:09] FAIL  - test_user_crud :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:10] FAIL  - test_product_crud :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:10] FAIL  - test_order_crud :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:11] FAIL  - test_transaction_rollback :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:11] FAIL  - test_migration_v3_1_3 :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:12] FAIL  - test_migration_v3_1_4 :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:12] FAIL  - test_migration_v3_2_0 :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:13] FAIL  - test_migration_v3_2_1 :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:13] FAIL  - test_migration_v3_2_2 :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:14] FAIL  - test_index_performance :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:14] FAIL  - test_connection_pool :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:15] FAIL  - test_read_replica_failover :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:15] FAIL  - test_db_encryption :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:16] FAIL  - test_db_backup_restore :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:16] INFO  - DB tests: 0 passed, 15 failed
+          [2026-06-12 10:01:17] INFO  - Running payment tests (10 tests)
+          [2026-06-12 10:01:17] FAIL  - test_payment_intent_create :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:18] FAIL  - test_payment_intent_confirm :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:18] FAIL  - test_payment_refund :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:19] FAIL  - test_payment_webhook :: ConfigError: STRIPE_WEBHOOK_SECRET not set
+          [2026-06-12 10:01:19] FAIL  - test_subscription_create :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:20] FAIL  - test_subscription_cancel :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:20] FAIL  - test_invoice_generate :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:21] FAIL  - test_checkout_session :: HTTPError: 503 from Stripe gateway
+          [2026-06-12 10:01:21] FAIL  - test_coupon_apply :: HTTPError: 503 from Stripe gateway
+          [2026-06-12 10:01:22] FAIL  - test_promo_code :: HTTPError: 503 from Stripe gateway
+          [2026-06-12 10:01:22] INFO  - Payment tests: 0 passed, 10 failed
+          [2026-06-12 10:01:23] INFO  - Running cache tests (8 tests)
+          [2026-06-12 10:01:23] FAIL  - test_cache_set :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:24] FAIL  - test_cache_get :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:24] FAIL  - test_cache_invalidation :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:25] FAIL  - test_cache_ttl :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:25] FAIL  - test_session_store :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:26] FAIL  - test_rate_limiting :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:26] FAIL  - test_distributed_lock :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:27] FAIL  - test_pubsub :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:27] INFO  - Cache tests: 0 passed, 8 failed
+          [2026-06-12 10:01:28] INFO  - Running email tests (6 tests)
+          [2026-06-12 10:01:28] FAIL  - test_send_welcome_email :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:29] FAIL  - test_send_reset_email :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:29] FAIL  - test_send_invoice_email :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:30] FAIL  - test_send_notification :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:30] FAIL  - test_email_template_render :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:31] FAIL  - test_email_bounce_handling :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:31] INFO  - Email tests: 0 passed, 6 failed
+          [2026-06-12 10:01:32] INFO  - Running API endpoint tests (35 tests)
+          [2026-06-12 10:01:32] PASS  - test_get_products :: GET /api/products returned 200 OK
+          [2026-06-12 10:01:33] PASS  - test_get_product_detail :: GET /api/products/1 returned 200 OK
+          [2026-06-12 10:01:33] PASS  - test_get_categories :: GET /api/categories returned 200 OK
+          [2026-06-12 10:01:34] PASS  - test_search_products :: GET /api/search returned 200 OK
+          [2026-06-12 10:01:34] FAIL  - test_create_order :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:35] FAIL  - test_get_order :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:35] FAIL  - test_update_order :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:36] FAIL  - test_cancel_order :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:36] FAIL  - test_get_user_profile :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:37] FAIL  - test_update_user_profile :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:37] FAIL  - test_upload_avatar :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:38] FAIL  - test_get_cart :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:38] FAIL  - test_add_to_cart :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:39] FAIL  - test_remove_from_cart :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:39] FAIL  - test_checkout :: HTTPError: 503 from Stripe gateway
+          [2026-06-12 10:01:40] FAIL  - test_apply_discount :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:40] FAIL  - test_get_recommendations :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:41] FAIL  - test_get_notifications :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:41] FAIL  - test_mark_notification_read :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:42] FAIL  - test_get_analytics :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:42] FAIL  - test_export_report :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:43] FAIL  - test_admin_list_users :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:43] FAIL  - test_admin_ban_user :: ConfigError: JWT_SECRET environment variable is not set
+          [2026-06-12 10:01:44] FAIL  - test_admin_refund :: ConfigError: STRIPE_SECRET_KEY is missing or empty
+          [2026-06-12 10:01:44] FAIL  - test_admin_send_broadcast :: SMTPError: SENDGRID_API_KEY not configured
+          [2026-06-12 10:01:45] FAIL  - test_feature_flag_on :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:45] FAIL  - test_feature_flag_off :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:46] FAIL  - test_webhook_stripe :: ConfigError: STRIPE_WEBHOOK_SECRET not set
+          [2026-06-12 10:01:46] FAIL  - test_webhook_sendgrid :: ConfigError: SENDGRID_WEBHOOK_SECRET not set
+          [2026-06-12 10:01:47] FAIL  - test_rate_limit_api :: RedisError: ECONNREFUSED redis-primary.internal:6379
+          [2026-06-12 10:01:47] FAIL  - test_cors_headers :: ConfigError: ALLOWED_ORIGINS not set
+          [2026-06-12 10:01:48] FAIL  - test_api_versioning :: ConnectionError: Cannot connect to database
+          [2026-06-12 10:01:48] INFO  - API tests: 4 passed, 31 failed
+          [2026-06-12 10:01:49] INFO  - ============================================================
+          [2026-06-12 10:01:49] INFO  - FINAL RESULTS: 6 passed, 80 failed, 0 skipped out of 86 tests
+          [2026-06-12 10:01:49] ERROR - Test suite failed. Exit code 1.
+          EOF
+          exit 1
+
+      - name: Upload Functionality Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functionality-test-logs
+          path: functionality.log
+
+
+  performance-test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Run Performance Benchmarks
+        run: |
+          cat > performance.log << 'EOF'
+          [2026-06-12 10:02:00] INFO  - Performance Benchmark Suite v1.3.0 starting
+          [2026-06-12 10:02:00] INFO  - Target: staging | Baseline: 200ms p99 threshold
+          [2026-06-12 10:02:01] INFO  - Warming up endpoints (3 iterations)...
+          [2026-06-12 10:02:05] INFO  - Warmup complete. Starting benchmark runs (10 iterations each)
+          [2026-06-12 10:02:06] PASS  - GET  /api/products           avg=87ms    p50=82ms    p95=121ms   p99=145ms
+          [2026-06-12 10:02:07] PASS  - GET  /api/categories          avg=43ms    p50=40ms    p95=68ms    p99=89ms
+          [2026-06-12 10:02:08] PASS  - GET  /api/product/:id         avg=91ms    p50=87ms    p95=130ms   p99=158ms
+          [2026-06-12 10:02:09] PASS  - GET  /api/search?q=laptop     avg=112ms   p50=108ms   p95=165ms   p99=189ms
+          [2026-06-12 10:02:10] FAIL  - POST /api/orders              avg=5823ms  p50=5200ms  p95=8100ms  p99=9800ms  — TIMEOUT: exceeds 200ms threshold by 4900%
+          [2026-06-12 10:02:11] FAIL  - GET  /api/user/history        avg=3421ms  p50=3100ms  p95=6200ms  p99=8100ms  — TIMEOUT: N+1 query detected (1247 queries per request)
+          [2026-06-12 10:02:12] FAIL  - POST /api/checkout            avg=7200ms  p50=6800ms  p95=11000ms p99=14200ms — TIMEOUT: Stripe API latency spike + DB lock contention
+          [2026-06-12 10:02:13] FAIL  - GET  /api/search?q=*          avg=4100ms  p50=3900ms  p95=7200ms  p99=9100ms  — TIMEOUT: Missing composite index on (products.name, products.category)
+          [2026-06-12 10:02:14] FAIL  - GET  /api/recommendations     avg=2900ms  p50=2700ms  p95=4800ms  p99=6200ms  — TIMEOUT: Full table scan on orders (12.4M rows, no index)
+          [2026-06-12 10:02:15] FAIL  - POST /api/auth/login          avg=1800ms  p50=1600ms  p95=3100ms  p99=4200ms  — TIMEOUT: bcrypt rounds too high (cost=14), blocking event loop
+          [2026-06-12 10:02:16] FAIL  - GET  /api/analytics/summary   avg=8900ms  p50=8200ms  p95=14000ms p99=18000ms — TIMEOUT: Aggregation on 50M+ rows without materialized view
+          [2026-06-12 10:02:17] FAIL  - POST /api/export/csv          avg=15200ms p50=14000ms p95=22000ms p99=28000ms — TIMEOUT: Streaming 500k rows without pagination
+          [2026-06-12 10:02:18] INFO  - Memory profiling results:
+          [2026-06-12 10:02:18] ERROR - /api/checkout      memory peaked at 94% (11.7GB / 12GB) during load test
+          [2026-06-12 10:02:19] ERROR - /api/analytics     memory peaked at 88% (10.6GB / 12GB) during aggregation
+          [2026-06-12 10:02:19] ERROR - /api/export/csv    memory peaked at 97% (11.6GB / 12GB) — OOM risk detected
+          [2026-06-12 10:02:20] INFO  - Concurrency test results (50 concurrent users):
+          [2026-06-12 10:02:21] ERROR - /api/orders        error rate: 34% under 50 concurrent users
+          [2026-06-12 10:02:21] ERROR - /api/checkout      error rate: 61% under 50 concurrent users — DB connection pool exhausted
+          [2026-06-12 10:02:22] ERROR - /api/analytics     error rate: 78% under 50 concurrent users — query timeout
+          [2026-06-12 10:02:22] INFO  - Summary: 4 endpoints passed, 8 endpoints failed
+          [2026-06-12 10:02:23] ERROR - 8 endpoints failed performance thresholds. Pipeline cannot proceed.
+          EOF
+          exit 1
+
+      - name: Upload Performance Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-logs
+          path: performance.log
+
+
+  integration-check:
+    name: Integration Check
+    runs-on: ubuntu-latest
+    needs: [ environment-healthcheck ]
+    if: always()
+    steps:
+
+      - name: Verify Service Integrations
+        run: |
+          cat > integration.log << 'EOF'
+          [2026-06-12 10:03:00] INFO  - Integration Check Suite v2.1.0 starting
+          [2026-06-12 10:03:00] INFO  - Checking 14 service integrations
+          [2026-06-12 10:03:01] PASS  - Auth service:            OK (138ms)     — JWT validation working
+          [2026-06-12 10:03:02] PASS  - Analytics service:       OK (94ms)      — Event tracking active
+          [2026-06-12 10:03:03] PASS  - CDN service:             OK (22ms)      — Assets serving correctly
+          [2026-06-12 10:03:04] ERROR - PostgreSQL primary:      FAIL           — DB connection refused at db-primary.internal:5432
+          [2026-06-12 10:03:05] ERROR - PostgreSQL replica:      FAIL           — DB replica also unreachable at db-replica.internal:5432
+          [2026-06-12 10:03:06] ERROR - Redis primary:           FAIL           — ECONNREFUSED at redis-primary.internal:6379
+          [2026-06-12 10:03:07] ERROR - Redis replica:           FAIL           — ECONNREFUSED at redis-replica.internal:6379
+          [2026-06-12 10:03:08] ERROR - RabbitMQ:                FAIL           — Connection refused at mq.internal:5672
+          [2026-06-12 10:03:09] ERROR - Elasticsearch:           FAIL           — 503 Service Unavailable at elastic.internal:9200
+          [2026-06-12 10:03:10] ERROR - Stripe payment gateway:  FAIL           — 503 Service Unavailable (3 retries exhausted)
+          [2026-06-12 10:03:11] ERROR - SendGrid SMTP:           FAIL           — Connection refused at smtp.sendgrid.net:587
+          [2026-06-12 10:03:12] ERROR - Vault secret store:      FAIL           — Vault sealed at vault.internal:8200
+          [2026-06-12 10:03:13] ERROR - Kubernetes API:          FAIL           — TLS handshake timeout at k8s.internal:6443
+          [2026-06-12 10:03:14] ERROR - Internal mail relay:     FAIL           — Connection refused at mail.internal:25
+          [2026-06-12 10:03:15] INFO  - Results: 3 services OK, 11 services FAILED
+          [2026-06-12 10:03:15] FATAL - Critical service integrations unavailable. Pipeline halted.
+          EOF
+          exit 1
+
+      - name: Upload Integration Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: integration.log
+
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Run Security Checks
+        run: |
+          cat > security.log << 'EOF'
+          [2026-06-12 10:04:00] INFO  - Security Scanner v3.2.0 starting
+          [2026-06-12 10:04:01] INFO  - Scanning dependencies for CVEs
+          [2026-06-12 10:04:02] ERROR - CVE-2024-21626 CRITICAL  — runc 1.1.11 container escape vulnerability
+          [2026-06-12 10:04:02] ERROR - CVE-2024-3094  CRITICAL  — XZ Utils backdoor (liblzma 5.6.0)
+          [2026-06-12 10:04:03] WARN  - CVE-2024-22365 HIGH      — pam 1.5.2 denial of service
+          [2026-06-12 10:04:03] WARN  - CVE-2024-0056  HIGH      — Microsoft.Data.SqlClient TLS bypass
+          [2026-06-12 10:04:04] WARN  - CVE-2023-50387 HIGH      — DNSSEC KeyTrap attack vector
+          [2026-06-12 10:04:05] INFO  - Scanning for exposed secrets in codebase
+          [2026-06-12 10:04:06] ERROR - EXPOSED SECRET — AWS_ACCESS_KEY found in src/config/legacy.js line 42
+          [2026-06-12 10:04:06] ERROR - EXPOSED SECRET — DATABASE_URL with credentials found in .env.example line 8
+          [2026-06-12 10:04:07] WARN  - SUSPICIOUS     — Hardcoded IP address 192.168.1.100 in src/utils/network.js line 17
+          [2026-06-12 10:04:08] INFO  - Scanning container image layers
+          [2026-06-12 10:04:09] ERROR - Base image ubuntu:20.04 has 47 known vulnerabilities (12 CRITICAL, 18 HIGH)
+          [2026-06-12 10:04:09] INFO  - Scanning API endpoints for security misconfigs
+          [2026-06-12 10:04:10] ERROR - CORS misconfiguration: Access-Control-Allow-Origin: * on /api/admin endpoints
+          [2026-06-12 10:04:10] ERROR - Missing rate limiting on /api/auth/login — brute force vulnerability
+          [2026-06-12 10:04:11] ERROR - SQL injection vector detected in /api/search?q= parameter
+          [2026-06-12 10:04:11] WARN  - Missing HSTS header on all endpoints
+          [2026-06-12 10:04:12] WARN  - JWT tokens not rotating — static secret detected
+          [2026-06-12 10:04:12] INFO  - Summary: 8 CRITICAL issues, 7 HIGH issues, 3 WARN issues
+          [2026-06-12 10:04:13] FATAL - Security scan failed. Pipeline blocked due to critical vulnerabilities.
+          EOF
+          exit 1
+
+      - name: Upload Security Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-logs
+          path: security.log
